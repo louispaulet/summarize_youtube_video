@@ -5,6 +5,7 @@ A small monorepo app that takes a YouTube URL, fetches the transcript, sends it 
 ## Architecture
 - `frontend/`: Vite + React JS + Tailwind CSS app
 - `backend/`: FastAPI app managed with `uv`
+- `worker/`: Cloudflare Worker deployment target that preserves the same API contract
 - `Makefile`: local developer entrypoints for frontend, backend, and full stack
 
 ## Monorepo Layout
@@ -63,6 +64,8 @@ Default local API URL:
 ```env
 VITE_API_BASE_URL=http://localhost:8000
 ```
+
+Production frontend builds read [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production), which is set to the deployed Cloudflare Worker backend URL.
 
 ## Local Development
 Run only the frontend:
@@ -124,11 +127,28 @@ npm run deploy
 
 The deploy script currently assumes the repository name is `summarize_youtube_video`. If the GitHub repo name changes, update the `build:gh-pages` script in [frontend/package.json](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/package.json).
 
-## Backend Hosting Options
-Recommended options for later:
+## Cloudflare Worker Deployment
+The repository now includes a Worker implementation in [worker/src/index.js](/Users/louispaulet/Documents/projects/summarize_youtube_video/worker/src/index.js) that exposes the same backend contract:
 
-1. Render: easiest low-cost option for a simple FastAPI app and easy env var management.
-2. Railway: simple developer experience and affordable for small hobby services.
-3. Fly.io: a good option if you want a bit more infra control and are comfortable with a slightly more hands-on setup.
+- `GET /health`
+- `POST /api/summarize`
 
-If you want the easiest path later, Render is the best starting point.
+Current deployed Worker:
+
+- `https://summarize-youtube-video-backend.louispaulet13.workers.dev`
+
+Useful Worker commands:
+
+```bash
+cd worker
+npm install
+npm run dev
+npm run deploy
+```
+
+Notes:
+
+- Local development still uses the FastAPI backend on `http://localhost:8000`.
+- The Cloudflare Worker implementation uses a Workers AI binding for summarization, while the local FastAPI backend still uses `OPENAI_API_KEY`.
+- If you want the frontend to target the deployed Worker, set `VITE_API_BASE_URL=https://summarize-youtube-video-backend.louispaulet13.workers.dev`.
+- GitHub Pages builds will already use that deployed backend automatically through [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production).

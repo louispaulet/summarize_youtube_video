@@ -1,6 +1,87 @@
 import { useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+
+function renderInlineMarkdown(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean)
+
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>
+    }
+
+    return <span key={index}>{part}</span>
+  })
+}
+
+function SummaryMarkdown({ markdown }) {
+  const lines = markdown.split(/\r?\n/)
+  const blocks = []
+  let paragraphLines = []
+  let listItems = []
+
+  function flushParagraph() {
+    if (paragraphLines.length === 0) {
+      return
+    }
+
+    blocks.push({
+      type: 'paragraph',
+      content: paragraphLines.join(' '),
+    })
+    paragraphLines = []
+  }
+
+  function flushList() {
+    if (listItems.length === 0) {
+      return
+    }
+
+    blocks.push({
+      type: 'list',
+      items: listItems,
+    })
+    listItems = []
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+
+    if (!line) {
+      flushParagraph()
+      flushList()
+      continue
+    }
+
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      flushParagraph()
+      listItems.push(line.slice(2).trim())
+      continue
+    }
+
+    flushList()
+    paragraphLines.push(line)
+  }
+
+  flushParagraph()
+  flushList()
+
+  return (
+    <>
+      {blocks.map((block, index) => {
+        if (block.type === 'list') {
+          return (
+            <ul key={index}>
+              {block.items.map((item) => (
+                <li key={item}>{renderInlineMarkdown(item)}</li>
+              ))}
+            </ul>
+          )
+        }
+
+        return <p key={index}>{renderInlineMarkdown(block.content)}</p>
+      })}
+    </>
+  )
+}
 
 function App() {
   const [youtubeUrl, setYoutubeUrl] = useState('')
@@ -127,7 +208,7 @@ function App() {
             </div>
             {summary ? (
               <article className="prose prose-stone prose-lg mt-8 max-w-none prose-headings:font-serif prose-headings:text-stone-950 prose-p:leading-8 prose-strong:text-stone-950 prose-li:marker:text-amber-700">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+                <SummaryMarkdown markdown={summary} />
               </article>
             ) : (
               <div className="mt-8 rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center">
