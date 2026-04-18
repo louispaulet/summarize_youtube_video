@@ -72,26 +72,6 @@ function App() {
                 Nano for a concise recap, and render the result as clean markdown.
               </p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-3xl border border-stone-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-                <p className="text-sm font-semibold text-stone-900">1. Transcript</p>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  Pulled directly from YouTube with `youtube-transcript-api`.
-                </p>
-              </div>
-              <div className="rounded-3xl border border-stone-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-                <p className="text-sm font-semibold text-stone-900">2. Summary</p>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  GPT-5 Nano produces bullet takeaways and a 3-paragraph recap.
-                </p>
-              </div>
-              <div className="rounded-3xl border border-stone-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-                <p className="text-sm font-semibold text-stone-900">3. Readable</p>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  Markdown is rendered with beautiful typography for quick scanning.
-                </p>
-              </div>
-            </div>
           </div>
           <div className="rounded-[2rem] border border-stone-200 bg-white/85 p-6 shadow-[0_30px_80px_-40px_rgba(120,53,15,0.45)] backdrop-blur">
             <form className="space-y-5" onSubmit={handleSubmit}>
@@ -135,17 +115,15 @@ function App() {
           <div className="rounded-[2rem] border border-stone-200 bg-white/90 p-6 shadow-[0_20px_60px_-45px_rgba(41,37,36,0.55)] backdrop-blur sm:p-8">
             <div className="flex flex-col gap-3 border-b border-stone-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-stone-500">
-                  Summary output
-                </p>
                 <h2 className="mt-2 font-serif text-3xl text-stone-950">
-                  Markdown recap
+                  Video brief
                 </h2>
               </div>
-              <p className="max-w-xl text-sm leading-6 text-stone-500">
-                The model returns three executive takeaways followed by short intro,
-                development, and conclusion paragraphs.
-              </p>
+              {!summary ? (
+                <p className="max-w-xl text-sm leading-6 text-stone-500">
+                  Three takeaways first, then a tight three-paragraph recap.
+                </p>
+              ) : null}
             </div>
             {summary ? (
               <article className="prose prose-stone prose-lg mt-8 max-w-none prose-headings:font-serif prose-headings:text-stone-950 prose-p:leading-8 prose-strong:text-stone-950 prose-li:marker:text-amber-700">
@@ -154,11 +132,10 @@ function App() {
             ) : (
               <div className="mt-8 rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center">
                 <p className="font-serif text-2xl text-stone-800">
-                  Your summary will appear here.
+                  Your brief will appear here.
                 </p>
                 <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-stone-500">
-                  Paste a YouTube link above to fetch the transcript and generate a
-                  readable markdown recap.
+                  Paste a YouTube link above to generate a concise recap.
                 </p>
               </div>
             )}

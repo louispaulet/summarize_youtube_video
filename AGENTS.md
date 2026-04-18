@@ -30,6 +30,7 @@
 ## Change Expectations
 - Before significant changes, run the relevant checks for the area you touched.
 - Prefer small, readable changes over heavy abstraction.
+- After completing a change, always commit and push it unless the user explicitly says not to.
 - Preserve the deployment split:
   - frontend deploys to GitHub Pages
   - backend deploys to a separate host
