@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: frontend backend up
+.PHONY: frontend backend up deploy
 
 frontend:
 	cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
@@ -10,3 +10,6 @@ backend:
 
 up:
 	@trap 'kill 0' EXIT; $(MAKE) backend & $(MAKE) frontend & wait
+
+deploy:
+	cd frontend && npm install && npm run deploy
