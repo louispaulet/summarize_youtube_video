@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 WORKER_PORT := 8787
 
-.PHONY: help frontend worker up kill deploy deploy-frontend deploy-worker
+.PHONY: help frontend worker up kill deploy deploy-frontend deploy-worker remove-bg png-to-webp
 
 help:
 	@printf "Available targets:\n"
@@ -13,6 +13,8 @@ help:
 	@printf "  make deploy          Deploy the frontend to GitHub Pages\n"
 	@printf "  make deploy-frontend Deploy the frontend to GitHub Pages\n"
 	@printf "  make deploy-worker   Deploy the Cloudflare Worker\n"
+	@printf "  make remove-bg       Remove an image background with rembg\n"
+	@printf "  make png-to-webp     Convert a PNG to a WebP favicon\n"
 
 frontend:
 	cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
@@ -39,3 +41,13 @@ deploy-frontend:
 
 deploy-worker:
 	cd worker && npm install && npm run deploy
+
+remove-bg:
+	@test -n "$(INPUT)" || { echo "Set INPUT=path/to/input.png"; exit 1; }
+	@test -n "$(OUTPUT)" || { echo "Set OUTPUT=path/to/output.png"; exit 1; }
+	uv run --python 3.11 --with 'rembg[cpu]' --with pillow python scripts/remove_background.py "$(INPUT)" "$(OUTPUT)"
+
+png-to-webp:
+	@test -n "$(INPUT)" || { echo "Set INPUT=path/to/input.png"; exit 1; }
+	@test -n "$(OUTPUT)" || { echo "Set OUTPUT=path/to/output.webp"; exit 1; }
+	uv run --python 3.11 --with pillow python scripts/png_to_webp.py "$(INPUT)" "$(OUTPUT)"
