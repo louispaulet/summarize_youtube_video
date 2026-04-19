@@ -3,15 +3,18 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
-from dotenv import load_dotenv
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
+from requests import Timeout as RequestsTimeout
 from youtube_transcript_api import (
     NoTranscriptFound,
+    RequestBlocked,
     TranscriptsDisabled,
     YouTubeTranscriptApi,
+    YouTubeRequestFailed,
 )
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -67,6 +70,13 @@ def extract_video_id(youtube_url: str) -> Optional[str]:
     return None
 
 
+def error_detail(code: str, message: str) -> dict[str, str]:
+    return {
+        "error_code": code,
+        "message": message,
+    }
+
+
 def transcript_priority(transcript) -> tuple[int, int, str]:
     language_code = getattr(transcript, "language_code", "") or ""
     is_generated = bool(getattr(transcript, "is_generated", False))
@@ -110,12 +120,59 @@ def get_transcript_text(video_id: str) -> str:
     except NoTranscriptFound as exc:
         raise HTTPException(
             status_code=422,
-            detail="No transcript was found for this video.",
+            detail=error_detail(
+                "transcript_not_found",
+                "No transcript was found for this video.",
+            ),
+        ) from exc
+    except RequestsTimeout as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=error_detail(
+                "caption_api_timed_out",
+                "The caption API timed out while fetching the transcript.",
+            ),
+        ) from exc
+    except RequestBlocked as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=error_detail(
+                "caption_api_rate_limited",
+                "The caption API rate limited transcript requests.",
+            ),
+        ) from exc
+    except YouTubeRequestFailed as exc:
+        reason = str(getattr(exc, "reason", "") or "").lower()
+        if "429" in reason or "too many requests" in reason:
+            raise HTTPException(
+                status_code=429,
+                detail=error_detail(
+                    "caption_api_rate_limited",
+                    "The caption API rate limited transcript requests.",
+                ),
+            ) from exc
+        if "timed out" in reason or "timeout" in reason:
+            raise HTTPException(
+                status_code=504,
+                detail=error_detail(
+                    "caption_api_timed_out",
+                    "The caption API timed out while fetching the transcript.",
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=error_detail(
+                "transcript_fetch_failed",
+                "Failed to fetch the YouTube transcript.",
+            ),
         ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail="Failed to fetch the YouTube transcript.",
+            detail=error_detail(
+                "transcript_fetch_failed",
+                "Failed to fetch the YouTube transcript.",
+            ),
         ) from exc
 
     transcript_text = " ".join(
@@ -127,7 +184,10 @@ def get_transcript_text(video_id: str) -> str:
     if not transcript_text:
         raise HTTPException(
             status_code=422,
-            detail="The transcript was empty for this video.",
+            detail=error_detail(
+                "transcript_empty",
+                "The transcript was empty for this video.",
+            ),
         )
 
     return transcript_text
@@ -138,7 +198,10 @@ def summarize_transcript(transcript_text: str) -> str:
     if not api_key:
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is missing from the environment.",
+            detail=error_detail(
+                "llm_not_available",
+                "OPENAI_API_KEY is missing from the environment.",
+            ),
         )
 
     client = OpenAI(api_key=api_key)
@@ -151,16 +214,38 @@ def summarize_transcript(transcript_text: str) -> str:
             text={"verbosity": "medium"},
         )
         summary = (response.output_text or "").strip()
+    except (APITimeoutError, APIConnectionError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_detail(
+                "llm_not_available",
+                "The summarization model is currently unavailable.",
+            ),
+        ) from exc
+    except RateLimitError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_detail(
+                "llm_not_available",
+                "The summarization model is currently unavailable.",
+            ),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail="OpenAI summarization failed.",
+            detail=error_detail(
+                "llm_not_available",
+                "The summarization model is currently unavailable.",
+            ),
         ) from exc
 
     if not summary:
         raise HTTPException(
             status_code=502,
-            detail="OpenAI returned an empty summary.",
+            detail=error_detail(
+                "llm_empty_response",
+                "OpenAI returned an empty summary.",
+            ),
         )
 
     return summary
