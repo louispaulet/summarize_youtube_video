@@ -1,5 +1,6 @@
 const SUMMARY_PROMPT = `Please summarize the YouTube video using the following transcript.
 
+Always write the recap in English.
 Return Markdown only.
 Start with exactly 3 executive takeaway bullet points.
 Then write an intro, development, and conclusion recap in 3 succinct paragraphs.`;
@@ -44,6 +45,16 @@ export default {
       { status: 404 },
     );
   },
+};
+
+export {
+  buildTranscriptFetchCandidates,
+  decodeEntities,
+  extractVideoId,
+  parseInlineJson,
+  parseTranscriptJson3,
+  parseTranscriptXml,
+  selectPreferredTranscriptTrack,
 };
 
 async function handleSummarize(request, env) {
@@ -143,40 +154,43 @@ async function getTranscriptText(videoId, youtubeUrl) {
     throw httpError(422, "No transcript was found for this video.");
   }
 
-  const transcriptUrl = tracks[0]?.baseUrl;
-  if (!transcriptUrl) {
-    throw httpError(422, "No transcript was found for this video.");
+  const preferredTrack = selectPreferredTranscriptTrack(tracks);
+  const preferredTracks = [
+    preferredTrack,
+    ...tracks.filter((track) => track !== preferredTrack),
+  ].filter(Boolean);
+
+  const failures = [];
+
+  for (const track of preferredTracks) {
+    try {
+      const transcriptText = await fetchTranscriptTextFromTrack(track);
+      if (transcriptText) {
+        return transcriptText;
+      }
+    } catch (error) {
+      failures.push({
+        languageCode: track?.languageCode || null,
+        kind: track?.kind || null,
+        message: error.message || "Unknown transcript fetch failure.",
+        status: error.status || 500,
+      });
+    }
   }
 
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(transcriptUrl);
-  } catch {
-    throw httpError(422, "No transcript was found for this video.");
-  }
-
-  if (!parsedUrl.hostname.endsWith(".youtube.com")) {
-    throw httpError(422, "No transcript was found for this video.");
-  }
-
-  const response = await fetch(transcriptUrl, {
-    headers: {
-      "User-Agent": WEB_USER_AGENT,
-    },
+  console.error("Transcript fetch failed", {
+    failures,
+    videoId,
   });
 
-  if (!response.ok) {
-    throw httpError(502, "Failed to fetch the YouTube transcript.");
+  if (failures.length > 0 && failures.every((failure) => failure.status === 429)) {
+    throw httpError(
+      429,
+      "YouTube is rate-limiting transcript requests right now. Please try again later.",
+    );
   }
 
-  const xml = await response.text();
-  const transcriptText = parseTranscriptXml(xml);
-
-  if (!transcriptText) {
-    throw httpError(422, "The transcript was empty for this video.");
-  }
-
-  return transcriptText;
+  throw httpError(502, "Failed to fetch the YouTube transcript.");
 }
 
 async function fetchTranscriptTracksViaInnerTube(videoId) {
@@ -237,6 +251,100 @@ async function fetchTranscriptTracksViaWatchPage(videoId, youtubeUrl) {
   }
 
   return tracks;
+}
+
+function selectPreferredTranscriptTrack(tracks) {
+  if (!Array.isArray(tracks) || tracks.length === 0) {
+    return null;
+  }
+
+  return (
+    tracks.find(
+      (track) =>
+        track?.languageCode === "en" && track?.kind !== "asr",
+    ) ||
+    tracks.find((track) => track?.languageCode === "en") ||
+    tracks.find((track) => track?.isTranslatable) ||
+    tracks[0]
+  );
+}
+
+function buildTranscriptFetchCandidates(track) {
+  if (!track?.baseUrl) {
+    return [];
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(track.baseUrl);
+  } catch {
+    return [];
+  }
+
+  if (!parsedUrl.hostname.endsWith(".youtube.com")) {
+    return [];
+  }
+
+  const candidates = [];
+  const formats = ["srv3", "json3"];
+  const shouldTranslateToEnglish =
+    track.languageCode && track.languageCode !== "en" && track.isTranslatable;
+
+  for (const format of formats) {
+    const candidate = new URL(parsedUrl.toString());
+    candidate.searchParams.set("fmt", format);
+
+    if (shouldTranslateToEnglish) {
+      candidate.searchParams.set("tlang", "en");
+    }
+
+    candidates.push({
+      format,
+      url: candidate.toString(),
+    });
+  }
+
+  return candidates;
+}
+
+async function fetchTranscriptTextFromTrack(track) {
+  const failures = [];
+
+  for (const candidate of buildTranscriptFetchCandidates(track)) {
+    const response = await fetch(candidate.url, {
+      headers: {
+        "User-Agent": WEB_USER_AGENT,
+      },
+    });
+
+    if (!response.ok) {
+      failures.push(`${candidate.format}:${response.status}`);
+      continue;
+    }
+
+    const body = await response.text();
+    const transcriptText =
+      candidate.format === "json3"
+        ? parseTranscriptJson3(body)
+        : parseTranscriptXml(body);
+
+    if (transcriptText) {
+      return transcriptText;
+    }
+
+    failures.push(`${candidate.format}:empty`);
+  }
+
+  const statuses = failures
+    .map((failure) => Number.parseInt(failure.split(":")[1] || "", 10))
+    .filter(Number.isFinite);
+  const status =
+    statuses.length > 0 && statuses.every((value) => value === 429) ? 429 : 502;
+
+  throw httpError(
+    status,
+    `Failed to fetch the YouTube transcript (${failures.join(", ") || "no candidates"}).`,
+  );
 }
 
 function parseInlineJson(html, variableName) {
@@ -303,6 +411,31 @@ function parseTranscriptXml(xml) {
   return textSegments.join(" ").trim();
 }
 
+function parseTranscriptJson3(jsonText) {
+  let data;
+
+  try {
+    data = JSON.parse(jsonText);
+  } catch {
+    return "";
+  }
+
+  const textSegments = [];
+  for (const event of data?.events || []) {
+    const segmentText = (event?.segs || [])
+      .map((segment) => segment?.utf8 || "")
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (segmentText) {
+      textSegments.push(segmentText);
+    }
+  }
+
+  return textSegments.join(" ").trim();
+}
+
 function decodeEntities(text) {
   return text
     .replaceAll("&amp;", "&")
@@ -329,7 +462,7 @@ async function summarizeTranscript(transcriptText, env) {
       { role: "system", content: SUMMARY_PROMPT },
       { role: "user", content: transcriptText },
     ],
-    max_tokens: 700,
+    max_tokens: 1200,
     temperature: 0.2,
   });
 

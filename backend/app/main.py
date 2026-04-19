@@ -2,7 +2,6 @@ import os
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -13,12 +12,12 @@ from youtube_transcript_api import (
     YouTubeTranscriptApi,
 )
 
-load_dotenv()
-
 SUMMARY_PROMPT = (
-    "Please summarize the youtube video using the following transcript, and then "
-    "output 3 execsum takeout bullet points first, then display an "
-    "intro/developpement/conclusion recap of the video in 3 succint paragraphs."
+    "Summarize the YouTube video from the transcript below. "
+    "Always write the recap in English. "
+    "Return Markdown only. "
+    "Start with exactly 3 executive takeaway bullet points. "
+    "Then write 3 succinct paragraphs labeled Intro, Development, and Conclusion."
 )
 
 
@@ -60,9 +59,28 @@ def extract_video_id(youtube_url: str) -> Optional[str]:
     return None
 
 
+def select_transcript(video_id: str):
+    transcript_list = YouTubeTranscriptApi().list(video_id)
+
+    try:
+        return transcript_list.find_transcript(["en", "en-US", "en-GB"])
+    except NoTranscriptFound:
+        pass
+
+    for transcript in transcript_list:
+        if getattr(transcript, "language_code", "").startswith("en"):
+            return transcript
+
+    for transcript in transcript_list:
+        if getattr(transcript, "is_translatable", False):
+            return transcript.translate("en")
+
+    raise NoTranscriptFound(video_id, [], transcript_list)
+
+
 def get_transcript_text(video_id: str) -> str:
     try:
-        transcript = YouTubeTranscriptApi().fetch(video_id)
+        transcript = select_transcript(video_id).fetch()
     except TranscriptsDisabled as exc:
         raise HTTPException(
             status_code=422,
@@ -99,7 +117,7 @@ def summarize_transcript(transcript_text: str) -> str:
     if not api_key:
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is missing. Add it to backend/.env before calling the API.",
+            detail="OPENAI_API_KEY is missing from the environment.",
         )
 
     client = OpenAI(api_key=api_key)
@@ -109,7 +127,7 @@ def summarize_transcript(transcript_text: str) -> str:
             model="gpt-5-nano",
             instructions=SUMMARY_PROMPT,
             input=transcript_text,
-            text={"verbosity": "low"},
+            text={"verbosity": "medium"},
         )
         summary = (response.output_text or "").strip()
     except Exception as exc:

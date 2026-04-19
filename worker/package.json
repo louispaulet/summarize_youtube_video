@@ -3,8 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check:transcript": "node scripts/check-transcript.mjs",
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "dev": "wrangler dev",
+    "test": "node --test src/index.test.js"
   },
   "devDependencies": {
     "wrangler": "^4.12.0"
