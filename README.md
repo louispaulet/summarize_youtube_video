@@ -41,17 +41,19 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Environment Setup
-Create the backend env file from the example:
+Create the shared repo env file from the example:
 
 ```bash
-cp backend/.env.example backend/.env
+cp .env.example .env
 ```
 
-Then set:
+Then set your OpenAI key:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
 ```
+
+The backend will read this shared `.env` automatically in local development.
 
 The frontend can optionally use its own env file:
 
@@ -66,6 +68,22 @@ VITE_API_BASE_URL=http://localhost:8000
 ```
 
 Production frontend builds read [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production), which is set to the deployed Cloudflare Worker backend URL.
+
+## Make Commands
+The `Makefile` now covers the main local and deploy entrypoints:
+
+- `make help`: list the available targets
+- `make frontend`: start the Vite frontend on `http://localhost:5173`
+- `make backend`: start the FastAPI backend on `http://localhost:8000`
+- `make worker`: start the Cloudflare Worker locally with Wrangler
+- `make up`: start the frontend and backend together
+- `make deploy`: deploy the frontend to GitHub Pages
+- `make deploy-frontend`: explicit frontend deploy target
+- `make deploy-worker`: deploy the Cloudflare Worker
+
+Naming note:
+- `make deploy` is kept as a convenience alias for the frontend deploy so existing usage still works.
+- `make deploy-frontend` and `make deploy-worker` make the deployment split explicit.
 
 ## Local Development
 Run only the frontend:
@@ -84,6 +102,12 @@ Run the full stack:
 
 ```bash
 make up
+```
+
+Run the Worker locally with Wrangler:
+
+```bash
+make worker
 ```
 
 Fixed local URLs:
@@ -146,9 +170,29 @@ npm run dev
 npm run deploy
 ```
 
+Equivalent `make` command:
+
+```bash
+make deploy-worker
+```
+
+Manual Wrangler deploy steps if you ever need to do it by hand:
+
+```bash
+cp .env.example .env
+# fill in OPENAI_API_KEY in .env
+
+cd worker
+npm install
+
+export OPENAI_API_KEY="$(grep '^OPENAI_API_KEY=' ../.env | cut -d '=' -f2-)"
+printf '%s' "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY --config wrangler.jsonc
+npx wrangler deploy --config wrangler.jsonc
+```
+
 Notes:
 
 - Local development still uses the FastAPI backend on `http://localhost:8000`.
-- The Cloudflare Worker implementation uses a Workers AI binding for summarization, while the local FastAPI backend still uses `OPENAI_API_KEY`.
+- `npm run deploy` inside [worker/](/Users/louispaulet/Documents/projects/summarize_youtube_video/worker) now reads `OPENAI_API_KEY` from the shared repo-level `.env`, updates the Worker secret in Cloudflare, and then deploys.
 - If you want the frontend to target the deployed Worker, set `VITE_API_BASE_URL=https://summarize-youtube-video-backend.louispaulet13.workers.dev`.
 - GitHub Pages builds will already use that deployed backend automatically through [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production).
