@@ -59,23 +59,36 @@ def extract_video_id(youtube_url: str) -> Optional[str]:
     return None
 
 
+def transcript_priority(transcript) -> tuple[int, int, str]:
+    language_code = getattr(transcript, "language_code", "") or ""
+    is_generated = bool(getattr(transcript, "is_generated", False))
+    is_english = language_code.startswith("en")
+
+    if is_english and not is_generated:
+        return (0, 0, language_code)
+    if not is_english and not is_generated:
+        return (1, 0, language_code)
+    if is_english and is_generated:
+        return (2, 0, language_code)
+    return (3, 0, language_code)
+
+
+def choose_transcript(transcript):
+    language_code = getattr(transcript, "language_code", "") or ""
+    is_english = language_code.startswith("en")
+    if is_english or not getattr(transcript, "is_translatable", False):
+        return transcript
+    return transcript.translate("en")
+
+
 def select_transcript(video_id: str):
-    transcript_list = YouTubeTranscriptApi().list(video_id)
+    transcript_list = list(YouTubeTranscriptApi().list(video_id))
 
-    try:
-        return transcript_list.find_transcript(["en", "en-US", "en-GB"])
-    except NoTranscriptFound:
-        pass
+    if not transcript_list:
+        raise NoTranscriptFound(video_id, [], transcript_list)
 
-    for transcript in transcript_list:
-        if getattr(transcript, "language_code", "").startswith("en"):
-            return transcript
-
-    for transcript in transcript_list:
-        if getattr(transcript, "is_translatable", False):
-            return transcript.translate("en")
-
-    raise NoTranscriptFound(video_id, [], transcript_list)
+    ranked_transcripts = sorted(transcript_list, key=transcript_priority)
+    return choose_transcript(ranked_transcripts[0])
 
 
 def get_transcript_text(video_id: str) -> str:

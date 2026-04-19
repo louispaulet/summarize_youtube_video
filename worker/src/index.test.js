@@ -7,6 +7,7 @@ import {
   parseTranscriptJson3,
   parseTranscriptXml,
   selectPreferredTranscriptTrack,
+  transcriptTrackPriority,
 } from "./index.js";
 
 test("extractVideoId supports watch and short URLs", () => {
@@ -28,6 +29,29 @@ test("selectPreferredTranscriptTrack prefers non-ASR English tracks", () => {
   ]);
 
   assert.equal(track.baseUrl, "https://www.youtube.com/api/timedtext?v=3");
+});
+
+test("transcriptTrackPriority matches english then manual then auto order", () => {
+  const ranked = [
+    { languageCode: "fr", kind: "asr" },
+    { languageCode: "en", kind: "asr" },
+    { languageCode: "fr" },
+    { languageCode: "en" },
+  ].sort((left, right) => {
+    const leftPriority = transcriptTrackPriority(left);
+    const rightPriority = transcriptTrackPriority(right);
+    for (let index = 0; index < leftPriority.length; index += 1) {
+      if (leftPriority[index] !== rightPriority[index]) {
+        return leftPriority[index] - rightPriority[index];
+      }
+    }
+    return 0;
+  });
+
+  assert.deepEqual(
+    ranked.map((track) => [track.languageCode, track.kind === "asr"]),
+    [["en", false], ["fr", false], ["en", true], ["fr", true]],
+  );
 });
 
 test("buildTranscriptFetchCandidates adds json3 and English translation when possible", () => {
