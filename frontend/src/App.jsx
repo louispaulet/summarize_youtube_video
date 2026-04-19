@@ -313,6 +313,15 @@ function App() {
               >
                 {isSubmitting ? 'Summarizing video...' : 'Summarize video'}
               </button>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
+                <p className="font-semibold text-amber-950">Deployment note</p>
+                <p className="mt-1">
+                  The app works locally, but the deployed Worker is currently blocked
+                  by YouTube when it tries to retrieve transcripts from Cloudflare IPs.
+                  That means the deployed version is not usable right now. Because it
+                  succeeds locally, a fix may or may not come later.
+                </p>
+              </div>
               <ErrorCard error={error} />
             </form>
           </div>

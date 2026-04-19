@@ -11,6 +11,8 @@ A small monorepo app that takes a YouTube URL, fetches the transcript through a 
 - Local development and production now share the same backend implementation.
 - `make up` validates the same Worker path that GitHub Pages uses in production.
 - The prior FastAPI backend has been removed so there is no split local-vs-prod backend behavior left in the repo.
+- The app works locally, but the deployed Worker is currently blocked by YouTube when it tries to retrieve transcripts from Cloudflare IPs. That means the deployed version is not usable right now.
+- Because the same transcript flow succeeds locally, a fix may or may not come later; the issue looks deployment-origin specific rather than a frontend bug.
 
 ## Prerequisites
 - Node.js and npm
@@ -122,6 +124,8 @@ Stages:
 ## Frontend Deployment
 The frontend is configured for GitHub Pages using `gh-pages`.
 
+The frontend build still deploys normally, but the live app depends on the Worker and the deployed Worker is currently blocked for transcript retrieval, so the hosted end-to-end experience is not usable right now.
+
 Typical deploy flow:
 
 ```bash
@@ -147,10 +151,10 @@ make deploy-worker
 `worker/scripts/deploy.mjs` reads `OPENAI_API_KEY` and `CLOUDFLARE_API_TOKEN` from the shared repo-level `.env`, updates the Worker secret in Cloudflare, and deploys the Worker.
 
 ## Production failure note
-If a video works locally but fails from the deployed Worker, that usually means the environment changed rather than the UI. For `https://www.youtube.com/watch?v=jjp3WC8Unj8`, the deployed Worker currently returns:
+If a video works locally but fails from the deployed Worker, that usually means the environment changed rather than the UI. In this repo, the local stack works, but YouTube appears to block transcript retrieval from the Cloudflare IPs used by the deployed Worker, so the deployed version is currently not usable. For `https://www.youtube.com/watch?v=jjp3WC8Unj8`, the deployed Worker currently returns:
 
 ```json
 {"detail":{"message":"Failed to fetch the YouTube transcript.","error_code":"transcript_fetch_failed","status":502,"stage":"youtube_transcript_fetch","retryable":true}}
 ```
 
-The same transcript-fetch logic succeeds from this local machine, which makes the failure environment-dependent. The most likely explanation is that YouTube treats the Worker’s network origin differently and blocks or rate-limits transcript access there. We should describe that as likely network-origin/IP blocking or rate-limiting, not as a proven single-datacenter root cause.
+The same transcript-fetch logic succeeds from this local machine, which makes the failure environment-dependent. The most likely explanation is that YouTube treats the Worker’s network origin differently and blocks or rate-limits transcript access there. A fix may or may not come later, but the local success strongly suggests this is a deployment-origin issue rather than a frontend regression.

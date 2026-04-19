@@ -24,6 +24,8 @@
   - `POST /api/summarize`
   - Request: `{ "youtube_url": "..." }`
   - Response: `{ "summary_markdown": "...", "video_id": "..." }`
+- The project works locally, but the deployed Worker is currently blocked by YouTube when it tries to retrieve transcripts from Cloudflare IPs. Treat the deployed version as unavailable for now.
+- Because the same flow succeeds locally, a fix may or may not come later; the failure appears deployment-origin specific rather than a frontend issue.
 
 ## Frontend Rules
 - The frontend is a single-page app with no routing.
