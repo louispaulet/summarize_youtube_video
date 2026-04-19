@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help frontend backend worker up deploy deploy-frontend deploy-worker
+.PHONY: help frontend backend worker up kill deploy deploy-frontend deploy-worker
 
 help:
 	@printf "Available targets:\n"
@@ -8,6 +8,7 @@ help:
 	@printf "  make backend         Start the FastAPI backend on http://localhost:8000\n"
 	@printf "  make worker          Start the Cloudflare Worker locally with Wrangler\n"
 	@printf "  make up              Start frontend and backend together\n"
+	@printf "  make kill            Stop local frontend and backend processes\n"
 	@printf "  make deploy          Deploy the frontend to GitHub Pages\n"
 	@printf "  make deploy-frontend Deploy the frontend to GitHub Pages\n"
 	@printf "  make deploy-worker   Deploy the Cloudflare Worker\n"
@@ -23,6 +24,15 @@ worker:
 
 up:
 	@trap 'kill 0' EXIT; $(MAKE) backend & $(MAKE) frontend & wait
+
+kill:
+	@pids=$$(lsof -ti tcp:5173 tcp:8000); \
+	if [ -n "$$pids" ]; then \
+		kill $$pids; \
+		echo "Stopped processes on ports 5173 and 8000"; \
+	else \
+		echo "No frontend or backend process found on ports 5173 or 8000"; \
+	fi
 
 deploy: deploy-frontend
 
