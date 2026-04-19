@@ -2,21 +2,31 @@
 from __future__ import annotations
 
 import argparse
-from colorsys import rgb_to_hsv
-from io import BytesIO
+from collections import deque
 from pathlib import Path
 
 from PIL import Image
-from rembg import remove
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Remove the background from an image and write a transparent PNG."
+        description="Remove the outer white halo from a logo while preserving the blue border."
     )
     parser.add_argument("input", type=Path, help="Path to the source image.")
     parser.add_argument("output", type=Path, help="Path to the output PNG.")
     return parser.parse_args()
+
+
+def is_background_candidate(r: int, g: int, b: int, a: int) -> bool:
+    if a == 0:
+        return True
+
+    brightest = max(r, g, b)
+    darkest = min(r, g, b)
+    saturation = 0.0 if brightest == 0 else (brightest - darkest) / brightest
+
+    # Remove only very light, low-saturation pixels that form the outer halo.
+    return saturation < 0.18 and brightest > 205
 
 
 def main() -> None:
@@ -24,55 +34,71 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     with Image.open(args.input) as image:
-        rgba_image = image.convert("RGBA")
-        input_buffer = BytesIO()
-        rgba_image.save(input_buffer, format="PNG")
+        rgba = image.convert("RGBA")
 
-    output_bytes = remove(
-        input_buffer.getvalue(),
-        alpha_matting=True,
-        alpha_matting_foreground_threshold=240,
-        alpha_matting_background_threshold=10,
-        alpha_matting_erode_size=10,
+    width, height = rgba.size
+    pixels = rgba.load()
+    background = [[False] * width for _ in range(height)]
+    queue: deque[tuple[int, int]] = deque()
+
+    def seed(x: int, y: int) -> None:
+        if not background[y][x]:
+            r, g, b, a = pixels[x, y]
+            if is_background_candidate(r, g, b, a):
+                background[y][x] = True
+                queue.append((x, y))
+
+    for x in range(width):
+        seed(x, 0)
+        seed(x, height - 1)
+
+    for y in range(height):
+        seed(0, y)
+        seed(width - 1, y)
+
+    neighbors = (
+        (-1, -1),
+        (-1, 0),
+        (-1, 1),
+        (0, -1),
+        (0, 1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
     )
 
-    with Image.open(BytesIO(output_bytes)) as output_image:
-        rgba_image = output_image.convert("RGBA")
-        filtered = Image.new("RGBA", rgba_image.size, (0, 0, 0, 0))
-        source_pixels = rgba_image.load()
-        filtered_pixels = filtered.load()
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in neighbors:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and not background[ny][nx]:
+                r, g, b, a = pixels[nx, ny]
+                if is_background_candidate(r, g, b, a):
+                    background[ny][nx] = True
+                    queue.append((nx, ny))
 
-        for y in range(rgba_image.height):
-            for x in range(rgba_image.width):
-                red, green, blue, alpha = source_pixels[x, y]
-                if alpha == 0:
-                    continue
+    cutout = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+    cutout_pixels = cutout.load()
+    for y in range(height):
+        for x in range(width):
+            if not background[y][x]:
+                cutout_pixels[x, y] = pixels[x, y]
 
-                hue, saturation, value = rgb_to_hsv(red / 255, green / 255, blue / 255)
-                keep_pixel = (
-                    value < 0.45
-                    or (saturation > 0.45 and not (0.46 <= hue <= 0.78))
-                    or (saturation < 0.2 and value < 0.7)
-                )
+    bbox = cutout.getbbox()
+    if bbox:
+        cutout = cutout.crop(bbox)
+        square_size = max(cutout.size)
+        square = Image.new("RGBA", (square_size, square_size), (0, 0, 0, 0))
+        square.paste(
+            cutout,
+            (
+                (square_size - cutout.size[0]) // 2,
+                (square_size - cutout.size[1]) // 2,
+            ),
+        )
+        cutout = square
 
-                if keep_pixel:
-                    filtered_pixels[x, y] = (red, green, blue, alpha)
-
-        bbox = filtered.getbbox()
-        if bbox:
-            filtered = filtered.crop(bbox)
-            square_size = max(filtered.size)
-            square = Image.new("RGBA", (square_size, square_size), (0, 0, 0, 0))
-            square.paste(
-                filtered,
-                (
-                    (square_size - filtered.size[0]) // 2,
-                    (square_size - filtered.size[1]) // 2,
-                ),
-            )
-            filtered = square
-
-        filtered.save(args.output, format="PNG")
+    cutout.save(args.output, format="PNG")
 
 
 if __name__ == "__main__":

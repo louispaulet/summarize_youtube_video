@@ -45,7 +45,7 @@ deploy-worker:
 remove-bg:
 	@test -n "$(INPUT)" || { echo "Set INPUT=path/to/input.png"; exit 1; }
 	@test -n "$(OUTPUT)" || { echo "Set OUTPUT=path/to/output.png"; exit 1; }
-	uv run --python 3.11 --with 'rembg[cpu]' --with pillow python scripts/remove_background.py "$(INPUT)" "$(OUTPUT)"
+	uv run --python 3.11 --with pillow python scripts/remove_background.py "$(INPUT)" "$(OUTPUT)"
 
 png-to-webp:
 	@test -n "$(INPUT)" || { echo "Set INPUT=path/to/input.png"; exit 1; }
