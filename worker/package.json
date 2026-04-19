@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "check:transcript": "node scripts/check-transcript.mjs",
-    "deploy": "wrangler deploy",
+    "deploy": "node scripts/deploy.mjs",
     "dev": "wrangler dev",
     "test": "node --test src/index.test.js"
   },

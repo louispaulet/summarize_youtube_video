@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   buildTranscriptFetchCandidates,
+  extractResponseOutputText,
   extractVideoId,
   parseTranscriptJson3,
   parseTranscriptXml,
   selectPreferredTranscriptTrack,
+  summarizeTranscript,
   transcriptTrackPriority,
 } from "./index.js";
 
@@ -82,4 +84,66 @@ test("parseTranscriptJson3 joins text segments", () => {
   });
 
   assert.equal(parseTranscriptJson3(json), "Hello world again");
+});
+
+test("summarizeTranscript requires OPENAI_API_KEY", async () => {
+  await assert.rejects(
+    summarizeTranscript("transcript", {}),
+    /OPENAI_API_KEY is missing from the environment\./,
+  );
+});
+
+test("summarizeTranscript uses the OpenAI Responses API", async () => {
+  const originalFetch = global.fetch;
+
+  global.fetch = async (url, init) => {
+    assert.equal(url, "https://api.openai.com/v1/responses");
+    assert.equal(init.method, "POST");
+    assert.equal(init.headers.Authorization, "Bearer test-key");
+
+    const payload = JSON.parse(init.body);
+    assert.equal(payload.model, "gpt-5-nano");
+    assert.equal(payload.input, "transcript");
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          output: [
+            {
+              type: "message",
+              content: [{ type: "output_text", text: "Summary output" }],
+            },
+          ],
+        };
+      },
+    };
+  };
+
+  try {
+    const summary = await summarizeTranscript("transcript", {
+      OPENAI_API_KEY: "test-key",
+    });
+
+    assert.equal(summary, "Summary output");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("extractResponseOutputText falls back to output content parts", () => {
+  const summary = extractResponseOutputText({
+    output: [
+      { type: "reasoning", summary: [] },
+      {
+        type: "message",
+        content: [
+          { type: "output_text", text: "First paragraph." },
+          { type: "output_text", text: "Second paragraph." },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(summary, "First paragraph.\n\nSecond paragraph.");
 });

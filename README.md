@@ -41,17 +41,19 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Environment Setup
-Create the backend env file from the example:
+Create the shared repo env file from the example:
 
 ```bash
-cp backend/.env.example backend/.env
+cp .env.example .env
 ```
 
-Then set:
+Then set your OpenAI key:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
 ```
+
+The backend will read this shared `.env` automatically in local development.
 
 The frontend can optionally use its own env file:
 
@@ -149,6 +151,6 @@ npm run deploy
 Notes:
 
 - Local development still uses the FastAPI backend on `http://localhost:8000`.
-- The Cloudflare Worker implementation uses a Workers AI binding for summarization, while the local FastAPI backend still uses `OPENAI_API_KEY`.
+- `npm run deploy` inside [worker/](/Users/louispaulet/Documents/projects/summarize_youtube_video/worker) now reads `OPENAI_API_KEY` from the shared repo-level `.env`, updates the Worker secret in Cloudflare, and then deploys.
 - If you want the frontend to target the deployed Worker, set `VITE_API_BASE_URL=https://summarize-youtube-video-backend.louispaulet13.workers.dev`.
 - GitHub Pages builds will already use that deployed backend automatically through [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production).

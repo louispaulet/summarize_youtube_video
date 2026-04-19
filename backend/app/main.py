@@ -1,16 +1,24 @@
 import os
+from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from youtube_transcript_api import (
     NoTranscriptFound,
     TranscriptsDisabled,
     YouTubeTranscriptApi,
 )
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
+# Prefer the shared repo-level .env while still allowing the legacy backend/.env file.
+load_dotenv(ROOT_DIR / ".env")
+load_dotenv(ROOT_DIR / "backend" / ".env")
 
 SUMMARY_PROMPT = (
     "Summarize the YouTube video from the transcript below. "

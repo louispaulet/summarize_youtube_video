@@ -51,11 +51,13 @@ export {
   buildTranscriptFetchCandidates,
   decodeEntities,
   extractVideoId,
+  extractResponseOutputText,
   parseInlineJson,
   parseTranscriptJson3,
   parseTranscriptXml,
   transcriptTrackPriority,
   selectPreferredTranscriptTrack,
+  summarizeTranscript,
 };
 
 async function handleSummarize(request, env) {
@@ -474,31 +476,58 @@ function decodeEntities(text) {
 }
 
 async function summarizeTranscript(transcriptText, env) {
-  if (!env.AI || typeof env.AI.run !== "function") {
-    throw httpError(500, "Cloudflare AI binding is missing.");
+  const apiKey =
+    typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
+
+  if (!apiKey) {
+    throw httpError(500, "OPENAI_API_KEY is missing from the environment.");
   }
 
-  const response = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
-    messages: [
-      { role: "system", content: SUMMARY_PROMPT },
-      { role: "user", content: transcriptText },
-    ],
-    max_tokens: 1200,
-    temperature: 0.2,
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-5-nano",
+      instructions: SUMMARY_PROMPT,
+      input: transcriptText,
+      text: {
+        verbosity: "medium",
+      },
+    }),
   });
 
-  const summary =
-    typeof response?.response === "string"
-      ? response.response.trim()
-      : typeof response?.result?.response === "string"
-        ? response.result.response.trim()
-        : "";
+  if (!response.ok) {
+    throw httpError(502, "OpenAI summarization failed.");
+  }
+
+  const data = await response.json();
+  const summary = extractResponseOutputText(data);
 
   if (!summary) {
-    throw httpError(502, "Cloudflare AI returned an empty summary.");
+    throw httpError(502, "OpenAI returned an empty summary.");
   }
 
   return summary;
+}
+
+function extractResponseOutputText(data) {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const content = Array.isArray(data?.output) ? data.output : [];
+  const text = content
+    .flatMap((item) => (Array.isArray(item?.content) ? item.content : []))
+    .filter((part) => part?.type === "output_text" && typeof part.text === "string")
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+
+  return text;
 }
 
 function corsHeaders(request) {
