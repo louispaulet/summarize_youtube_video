@@ -313,11 +313,6 @@ function App() {
               >
                 {isSubmitting ? 'Summarizing video...' : 'Summarize video'}
               </button>
-              <p className="text-sm leading-6 text-stone-500">
-                Local frontend: <span className="font-medium text-stone-700">5173</span>.
-                Local Worker: <span className="font-medium text-stone-700">8787</span>.
-                Dev requests use the frontend proxy.
-              </p>
               <ErrorCard error={error} />
             </form>
           </div>
