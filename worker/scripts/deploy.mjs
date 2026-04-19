@@ -13,10 +13,18 @@ const deployEnv = {
 };
 
 const apiKey = deployEnv.OPENAI_API_KEY?.trim();
+const cloudflareApiToken = deployEnv.CLOUDFLARE_API_TOKEN?.trim();
 
 if (!apiKey) {
   console.error(
     `Missing OPENAI_API_KEY. Create ${repoEnvPath} from ${resolve(repoRoot, ".env.example")} before deploying.`,
+  );
+  process.exit(1);
+}
+
+if (!cloudflareApiToken) {
+  console.error(
+    `Missing CLOUDFLARE_API_TOKEN. Create ${repoEnvPath} from ${resolve(repoRoot, ".env.example")} before deploying.`,
   );
   process.exit(1);
 }
