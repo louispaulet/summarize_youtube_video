@@ -8,6 +8,9 @@
 ## Local Development
 - Frontend port is fixed to `5173`.
 - Backend port is fixed to `8000`.
+- Use Chrome MCP for quick end-to-end checks against the deployed app:
+  - frontend: `https://louispaulet.github.io/summarize_youtube_video/`
+  - backend: `https://summarize-youtube-video-backend.louispaulet13.workers.dev/api/summarize`
 - Preferred commands:
   - `make frontend`
   - `make backend`
