@@ -69,6 +69,22 @@ VITE_API_BASE_URL=http://localhost:8000
 
 Production frontend builds read [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production), which is set to the deployed Cloudflare Worker backend URL.
 
+## Make Commands
+The `Makefile` now covers the main local and deploy entrypoints:
+
+- `make help`: list the available targets
+- `make frontend`: start the Vite frontend on `http://localhost:5173`
+- `make backend`: start the FastAPI backend on `http://localhost:8000`
+- `make worker`: start the Cloudflare Worker locally with Wrangler
+- `make up`: start the frontend and backend together
+- `make deploy`: deploy the frontend to GitHub Pages
+- `make deploy-frontend`: explicit frontend deploy target
+- `make deploy-worker`: deploy the Cloudflare Worker
+
+Naming note:
+- `make deploy` is kept as a convenience alias for the frontend deploy so existing usage still works.
+- `make deploy-frontend` and `make deploy-worker` make the deployment split explicit.
+
 ## Local Development
 Run only the frontend:
 
@@ -86,6 +102,12 @@ Run the full stack:
 
 ```bash
 make up
+```
+
+Run the Worker locally with Wrangler:
+
+```bash
+make worker
 ```
 
 Fixed local URLs:
@@ -146,6 +168,26 @@ cd worker
 npm install
 npm run dev
 npm run deploy
+```
+
+Equivalent `make` command:
+
+```bash
+make deploy-worker
+```
+
+Manual Wrangler deploy steps if you ever need to do it by hand:
+
+```bash
+cp .env.example .env
+# fill in OPENAI_API_KEY in .env
+
+cd worker
+npm install
+
+export OPENAI_API_KEY="$(grep '^OPENAI_API_KEY=' ../.env | cut -d '=' -f2-)"
+printf '%s' "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY --config wrangler.jsonc
+npx wrangler deploy --config wrangler.jsonc
 ```
 
 Notes:
