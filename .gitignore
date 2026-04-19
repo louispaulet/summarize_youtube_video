@@ -137,6 +137,7 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.dev.vars
 .venv
 node_modules/
 dist/
@@ -202,6 +203,10 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Wrangler local state
+worker/.wrangler/
+worker/.dev.vars
 
 # Marimo
 marimo/_static/

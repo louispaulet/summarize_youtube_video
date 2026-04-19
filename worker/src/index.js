@@ -19,6 +19,12 @@ const INNER_TUBE_CONTEXT = {
   },
 };
 const INNER_TUBE_USER_AGENT = `com.google.android.youtube/${INNER_TUBE_VERSION} (Linux; U; Android 14)`;
+const ERROR_STAGES = {
+  requestValidation: "request_validation",
+  youtubeTrackLookup: "youtube_track_lookup",
+  youtubeTranscriptFetch: "youtube_transcript_fetch",
+  openAiSummary: "openai_summary",
+};
 
 export default {
   async fetch(request, env) {
@@ -39,64 +45,74 @@ export default {
       return handleSummarize(request, env);
     }
 
-    return jsonResponse(
+    return errorResponse(
       request,
-      { detail: "Not found." },
-      { status: 404 },
+      apiError(
+        404,
+        "route_not_found",
+        "Not found.",
+        ERROR_STAGES.requestValidation,
+        false,
+      ),
     );
   },
 };
 
 export {
+  apiError,
   buildTranscriptFetchCandidates,
+  createErrorDetail,
   decodeEntities,
   extractVideoId,
   extractResponseOutputText,
   parseInlineJson,
   parseTranscriptJson3,
   parseTranscriptXml,
-  transcriptTrackPriority,
   selectPreferredTranscriptTrack,
   summarizeTranscript,
+  transcriptTrackPriority,
 };
 
 async function handleSummarize(request, env) {
-  let payload;
-
   try {
-    payload = await request.json();
-  } catch {
-    return jsonResponse(
-      request,
-      { detail: "Request body must be valid JSON." },
-      { status: 400 },
-    );
-  }
+    let payload;
 
-  const youtubeUrl =
-    typeof payload?.youtube_url === "string" ? payload.youtube_url.trim() : "";
+    try {
+      payload = await request.json();
+    } catch {
+      throw apiError(
+        400,
+        "request_body_invalid",
+        "Request body must be valid JSON.",
+        ERROR_STAGES.requestValidation,
+        false,
+      );
+    }
 
-  if (!youtubeUrl) {
-    return jsonResponse(
-      request,
-      { detail: "Please provide a YouTube URL." },
-      { status: 400 },
-    );
-  }
+    const youtubeUrl =
+      typeof payload?.youtube_url === "string" ? payload.youtube_url.trim() : "";
 
-  const videoId = extractVideoId(youtubeUrl);
-  if (!videoId) {
-    return jsonResponse(
-      request,
-      {
-        detail:
-          "Please provide a valid YouTube watch, short, embed, or youtu.be URL.",
-      },
-      { status: 400 },
-    );
-  }
+    if (!youtubeUrl) {
+      throw apiError(
+        400,
+        "youtube_url_required",
+        "Please provide a YouTube URL.",
+        ERROR_STAGES.requestValidation,
+        false,
+      );
+    }
 
-  try {
+    const videoId = extractVideoId(youtubeUrl);
+    if (!videoId) {
+      throw apiError(
+        400,
+        "youtube_url_invalid",
+        "Please provide a valid YouTube watch, short, embed, or youtu.be URL.",
+        ERROR_STAGES.requestValidation,
+        false,
+      );
+    }
+
     const transcriptText = await getTranscriptText(videoId, youtubeUrl);
     const summaryMarkdown = await summarizeTranscript(transcriptText, env);
 
@@ -105,11 +121,7 @@ async function handleSummarize(request, env) {
       video_id: videoId,
     });
   } catch (error) {
-    return jsonResponse(
-      request,
-      { detail: error.message || "Unexpected backend failure." },
-      { status: error.status || 500 },
-    );
+    return errorResponse(request, error);
   }
 }
 
@@ -149,12 +161,25 @@ function extractVideoId(youtubeUrl) {
 }
 
 async function getTranscriptText(videoId, youtubeUrl) {
-  const tracks =
-    (await fetchTranscriptTracksViaInnerTube(videoId)) ||
-    (await fetchTranscriptTracksViaWatchPage(videoId, youtubeUrl));
+  const innerTubeTracks = await fetchTranscriptTracksViaInnerTube(videoId);
 
+  if (Array.isArray(innerTubeTracks) && innerTubeTracks.length > 0) {
+    return fetchTranscriptTextFromTracks(videoId, innerTubeTracks);
+  }
+
+  const watchPageTracks = await fetchTranscriptTracksViaWatchPage(videoId, youtubeUrl);
+  return fetchTranscriptTextFromTracks(videoId, watchPageTracks);
+}
+
+async function fetchTranscriptTextFromTracks(videoId, tracks) {
   if (!Array.isArray(tracks) || tracks.length === 0) {
-    throw httpError(422, "No transcript was found for this video.");
+    throw apiError(
+      422,
+      "transcript_not_found",
+      "No transcript was found for this video.",
+      ERROR_STAGES.youtubeTranscriptFetch,
+      false,
+    );
   }
 
   const preferredTrack = selectPreferredTranscriptTrack(tracks);
@@ -162,38 +187,59 @@ async function getTranscriptText(videoId, youtubeUrl) {
     preferredTrack,
     ...tracks.filter((track) => track !== preferredTrack),
   ].filter(Boolean);
-
   const failures = [];
 
   for (const track of preferredTracks) {
     try {
-      const transcriptText = await fetchTranscriptTextFromTrack(track);
+      const transcriptText = await fetchTranscriptTextFromTrack(track, videoId);
       if (transcriptText) {
         return transcriptText;
       }
     } catch (error) {
       failures.push({
+        errorCode: error?.errorCode || "transcript_fetch_failed",
         languageCode: track?.languageCode || null,
         kind: track?.kind || null,
-        message: error.message || "Unknown transcript fetch failure.",
-        status: error.status || 500,
+        message: error?.message || "Unknown transcript fetch failure.",
+        retryable: Boolean(error?.retryable),
+        status: error?.status || 500,
       });
     }
   }
 
   console.error("Transcript fetch failed", {
     failures,
+    stage: ERROR_STAGES.youtubeTranscriptFetch,
     videoId,
   });
 
   if (failures.length > 0 && failures.every((failure) => failure.status === 429)) {
-    throw httpError(
+    throw apiError(
       429,
+      "youtube_rate_limited",
       "YouTube is rate-limiting transcript requests right now. Please try again later.",
+      ERROR_STAGES.youtubeTranscriptFetch,
+      true,
     );
   }
 
-  throw httpError(502, "Failed to fetch the YouTube transcript.");
+  if (failures.length > 0 && failures.every((failure) => failure.status === 422)) {
+    throw apiError(
+      422,
+      "transcript_empty",
+      "The transcript was empty for this video.",
+      ERROR_STAGES.youtubeTranscriptFetch,
+      false,
+    );
+  }
+
+  throw apiError(
+    502,
+    "transcript_fetch_failed",
+    "Failed to fetch the YouTube transcript.",
+    ERROR_STAGES.youtubeTranscriptFetch,
+    true,
+  );
 }
 
 async function fetchTranscriptTracksViaInnerTube(videoId) {
@@ -211,12 +257,22 @@ async function fetchTranscriptTracksViaInnerTube(videoId) {
     });
 
     if (!response.ok) {
+      console.warn("YouTube InnerTube lookup failed", {
+        stage: ERROR_STAGES.youtubeTrackLookup,
+        upstreamStatus: response.status,
+        videoId,
+      });
       return null;
     }
 
     const data = await response.json();
     return data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? null;
-  } catch {
+  } catch (error) {
+    console.warn("YouTube InnerTube lookup threw", {
+      message: error instanceof Error ? error.message : "Unknown InnerTube lookup error.",
+      stage: ERROR_STAGES.youtubeTrackLookup,
+      videoId,
+    });
     return null;
   }
 }
@@ -229,20 +285,44 @@ async function fetchTranscriptTracksViaWatchPage(videoId, youtubeUrl) {
   });
 
   if (!response.ok) {
-    throw httpError(502, "Failed to fetch the YouTube transcript.");
+    console.error("YouTube watch page lookup failed", {
+      stage: ERROR_STAGES.youtubeTrackLookup,
+      upstreamStatus: response.status,
+      videoId,
+    });
+    throw apiError(
+      502,
+      "youtube_track_lookup_failed",
+      "YouTube transcript metadata could not be fetched right now.",
+      ERROR_STAGES.youtubeTrackLookup,
+      true,
+    );
   }
 
   const html = await response.text();
 
   if (html.includes('class="g-recaptcha"')) {
-    throw httpError(
+    console.warn("YouTube watch page was rate limited", {
+      stage: ERROR_STAGES.youtubeTrackLookup,
+      videoId,
+    });
+    throw apiError(
       429,
+      "youtube_rate_limited",
       "YouTube is rate-limiting transcript requests right now. Please try again later.",
+      ERROR_STAGES.youtubeTrackLookup,
+      true,
     );
   }
 
   if (!html.includes('"playabilityStatus":')) {
-    throw httpError(404, `The video is no longer available (${youtubeUrl}).`);
+    throw apiError(
+      404,
+      "video_not_available",
+      `The video is no longer available (${youtubeUrl}).`,
+      ERROR_STAGES.youtubeTrackLookup,
+      false,
+    );
   }
 
   const playerResponse = parseInlineJson(html, "ytInitialPlayerResponse");
@@ -250,7 +330,13 @@ async function fetchTranscriptTracksViaWatchPage(videoId, youtubeUrl) {
     playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
   if (!Array.isArray(tracks) || tracks.length === 0) {
-    throw httpError(422, "Transcripts are disabled for this video.");
+    throw apiError(
+      422,
+      "transcripts_disabled",
+      "Transcripts are disabled for this video.",
+      ERROR_STAGES.youtubeTrackLookup,
+      false,
+    );
   }
 
   return tracks;
@@ -330,8 +416,8 @@ function buildTranscriptFetchCandidates(track) {
   return candidates;
 }
 
-async function fetchTranscriptTextFromTrack(track) {
-  const failures = [];
+async function fetchTranscriptTextFromTrack(track, videoId) {
+  const candidateResults = [];
 
   for (const candidate of buildTranscriptFetchCandidates(track)) {
     const response = await fetch(candidate.url, {
@@ -341,7 +427,11 @@ async function fetchTranscriptTextFromTrack(track) {
     });
 
     if (!response.ok) {
-      failures.push(`${candidate.format}:${response.status}`);
+      candidateResults.push({
+        format: candidate.format,
+        ok: false,
+        status: response.status,
+      });
       continue;
     }
 
@@ -351,22 +441,70 @@ async function fetchTranscriptTextFromTrack(track) {
         ? parseTranscriptJson3(body)
         : parseTranscriptXml(body);
 
+    candidateResults.push({
+      format: candidate.format,
+      ok: true,
+      status: response.status,
+      transcriptLength: transcriptText.length,
+    });
+
     if (transcriptText) {
       return transcriptText;
     }
-
-    failures.push(`${candidate.format}:empty`);
   }
 
-  const statuses = failures
-    .map((failure) => Number.parseInt(failure.split(":")[1] || "", 10))
-    .filter(Number.isFinite);
-  const status =
-    statuses.length > 0 && statuses.every((value) => value === 429) ? 429 : 502;
+  console.warn("Transcript candidate fetch failed", {
+    candidateResults,
+    languageCode: track?.languageCode || null,
+    kind: track?.kind || null,
+    stage: ERROR_STAGES.youtubeTranscriptFetch,
+    videoId,
+  });
 
-  throw httpError(
-    status,
-    `Failed to fetch the YouTube transcript (${failures.join(", ") || "no candidates"}).`,
+  if (candidateResults.length === 0) {
+    throw apiError(
+      422,
+      "transcript_not_found",
+      "No transcript was found for this video.",
+      ERROR_STAGES.youtubeTranscriptFetch,
+      false,
+    );
+  }
+
+  const statuses = candidateResults
+    .map((candidate) => candidate.status)
+    .filter(Number.isFinite);
+
+  if (statuses.length > 0 && statuses.every((status) => status === 429)) {
+    throw apiError(
+      429,
+      "youtube_rate_limited",
+      "YouTube is rate-limiting transcript requests right now. Please try again later.",
+      ERROR_STAGES.youtubeTranscriptFetch,
+      true,
+    );
+  }
+
+  if (
+    candidateResults.every(
+      (candidate) => candidate.ok === true && candidate.transcriptLength === 0,
+    )
+  ) {
+    throw apiError(
+      422,
+      "transcript_empty",
+      "The transcript was empty for this video.",
+      ERROR_STAGES.youtubeTranscriptFetch,
+      false,
+    );
+  }
+
+  throw apiError(
+    502,
+    "transcript_fetch_failed",
+    "Failed to fetch the YouTube transcript.",
+    ERROR_STAGES.youtubeTranscriptFetch,
+    true,
   );
 }
 
@@ -480,34 +618,72 @@ async function summarizeTranscript(transcriptText, env) {
     typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
 
   if (!apiKey) {
-    throw httpError(500, "OPENAI_API_KEY is missing from the environment.");
+    throw apiError(
+      500,
+      "llm_not_available",
+      "OPENAI_API_KEY is missing from the environment.",
+      ERROR_STAGES.openAiSummary,
+      false,
+    );
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-5-nano",
-      instructions: SUMMARY_PROMPT,
-      input: transcriptText,
-      text: {
-        verbosity: "medium",
+  let response;
+
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
-    }),
-  });
+      body: JSON.stringify({
+        model: "gpt-5-nano",
+        instructions: SUMMARY_PROMPT,
+        input: transcriptText,
+        text: {
+          verbosity: "medium",
+        },
+      }),
+    });
+  } catch (error) {
+    console.error("OpenAI summarization request failed", {
+      message: error instanceof Error ? error.message : "Unknown OpenAI request failure.",
+      stage: ERROR_STAGES.openAiSummary,
+    });
+    throw apiError(
+      503,
+      "llm_not_available",
+      "The summarization model is currently unavailable.",
+      ERROR_STAGES.openAiSummary,
+      true,
+    );
+  }
 
   if (!response.ok) {
-    throw httpError(502, "OpenAI summarization failed.");
+    console.error("OpenAI summarization returned a non-OK response", {
+      stage: ERROR_STAGES.openAiSummary,
+      upstreamStatus: response.status,
+    });
+    throw apiError(
+      response.status === 429 || response.status >= 500 ? 503 : 502,
+      "llm_not_available",
+      "The summarization model is currently unavailable.",
+      ERROR_STAGES.openAiSummary,
+      response.status === 429 || response.status >= 500,
+    );
   }
 
   const data = await response.json();
   const summary = extractResponseOutputText(data);
 
   if (!summary) {
-    throw httpError(502, "OpenAI returned an empty summary.");
+    throw apiError(
+      502,
+      "llm_empty_response",
+      "OpenAI returned an empty summary.",
+      ERROR_STAGES.openAiSummary,
+      false,
+    );
   }
 
   return summary;
@@ -552,6 +728,45 @@ function jsonResponse(request, data, init = {}) {
   });
 }
 
-function httpError(status, message) {
-  return Object.assign(new Error(message), { status });
+function errorResponse(request, error) {
+  const detail = createErrorDetail(error);
+  return jsonResponse(
+    request,
+    { detail },
+    {
+      status: detail.status,
+    },
+  );
+}
+
+function createErrorDetail(error) {
+  if (error && typeof error === "object" && "errorCode" in error) {
+    return {
+      message: error.message || "Unexpected backend failure.",
+      error_code: error.errorCode || "unexpected_backend_failure",
+      retryable: Boolean(error.retryable),
+      stage: error.stage || ERROR_STAGES.requestValidation,
+      status: error.status || 500,
+    };
+  }
+
+  return {
+    message:
+      error instanceof Error && error.message
+        ? error.message
+        : "Unexpected backend failure.",
+    error_code: "unexpected_backend_failure",
+    retryable: false,
+    stage: ERROR_STAGES.requestValidation,
+    status: 500,
+  };
+}
+
+function apiError(status, errorCode, message, stage, retryable) {
+  return Object.assign(new Error(message), {
+    errorCode,
+    retryable,
+    stage,
+    status,
+  });
 }

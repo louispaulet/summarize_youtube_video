@@ -5,7 +5,7 @@
   "scripts": {
     "check:transcript": "node scripts/check-transcript.mjs",
     "deploy": "node scripts/deploy.mjs",
-    "dev": "wrangler dev",
+    "dev": "node scripts/dev.mjs",
     "test": "node --test src/index.test.js"
   },
   "devDependencies": {

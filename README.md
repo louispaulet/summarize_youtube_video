@@ -1,118 +1,77 @@
 # YouTube Video Summarizer
 
-A small monorepo app that takes a YouTube URL, fetches the transcript, sends it to `gpt-5-nano`, and displays a polished Markdown summary in the browser.
+A small monorepo app that takes a YouTube URL, fetches the transcript through a Cloudflare Worker, sends it to `gpt-5-nano`, and displays a polished Markdown summary in the browser.
 
 ## Architecture
-- `frontend/`: Vite + React JS + Tailwind CSS app
-- `backend/`: FastAPI app managed with `uv`
-- `worker/`: Cloudflare Worker deployment target that preserves the same API contract
-- `Makefile`: local developer entrypoints for frontend, backend, and full stack
+- `frontend/`: Vite + React + Tailwind single-page app
+- `worker/`: Cloudflare Worker that owns the only backend API
+- `Makefile`: local developer entrypoints for frontend, Worker, and deploys
 
-## Monorepo Layout
-```text
-.
-├── AGENTS.md
-├── Makefile
-├── README.md
-├── backend
-│   ├── .env.example
-│   ├── pyproject.toml
-│   └── app
-│       └── main.py
-└── frontend
-    ├── .env.example
-    ├── package.json
-    ├── src
-    │   ├── App.jsx
-    │   ├── index.css
-    │   └── main.jsx
-    └── vite.config.js
-```
+## Why the Worker matters
+- Local development and production now share the same backend implementation.
+- `make up` validates the same Worker path that GitHub Pages uses in production.
+- The prior FastAPI backend has been removed so there is no split local-vs-prod backend behavior left in the repo.
 
 ## Prerequisites
 - Node.js and npm
-- Python 3.9+
-- `uv`
+- A repo-level `.env` file with:
 
-Install `uv` if needed:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+CLOUDFLARE_API_TOKEN=your_cloudflare_api_token_here
 ```
 
-## Environment Setup
-Create the shared repo env file from the example:
+Create it from the example if needed:
 
 ```bash
 cp .env.example .env
 ```
 
-Then set your OpenAI key:
-
-```env
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-The backend will read this shared `.env` automatically in local development.
-
-The frontend can optionally use its own env file:
+## Frontend Environment
+Create the frontend env file if you want an explicit local override:
 
 ```bash
 cp frontend/.env.example frontend/.env
 ```
 
-Default local API URL:
+Local default:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8787
 ```
 
-Production frontend builds read [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production), which is set to the deployed Cloudflare Worker backend URL.
+Production builds already point to the deployed Worker through [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production).
 
 ## Make Commands
-The `Makefile` now covers the main local and deploy entrypoints:
-
-- `make help`: list the available targets
 - `make frontend`: start the Vite frontend on `http://localhost:5173`
-- `make backend`: start the FastAPI backend on `http://localhost:8000`
-- `make worker`: start the Cloudflare Worker locally with Wrangler
-- `make up`: start the frontend and backend together
+- `make worker`: start the Cloudflare Worker locally on `http://localhost:8787`
+- `make up`: start frontend and Worker together
+- `make kill`: stop local frontend and Worker processes
 - `make deploy`: deploy the frontend to GitHub Pages
 - `make deploy-frontend`: explicit frontend deploy target
 - `make deploy-worker`: deploy the Cloudflare Worker
 
-Naming note:
-- `make deploy` is kept as a convenience alias for the frontend deploy so existing usage still works.
-- `make deploy-frontend` and `make deploy-worker` make the deployment split explicit.
-
 ## Local Development
-Run only the frontend:
-
-```bash
-make frontend
-```
-
-Run only the backend:
-
-```bash
-make backend
-```
-
-Run the full stack:
+Run the full local stack:
 
 ```bash
 make up
 ```
 
-Run the Worker locally with Wrangler:
-
-```bash
-make worker
-```
-
 Fixed local URLs:
 - Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8000`
+- Worker API: `http://localhost:8787`
+
+Local smoke checks:
+
+```bash
+curl http://localhost:8787/health
+curl -X POST http://localhost:8787/api/summarize \
+  -H 'Content-Type: application/json' \
+  --data '{"youtube_url":"https://www.youtube.com/watch?v=jjp3WC8Unj8"}'
+```
+
+Then open `http://localhost:5173` and submit a YouTube URL through the UI.
 
 ## API Overview
 Endpoint:
@@ -130,7 +89,7 @@ Request body:
 }
 ```
 
-Response body:
+Success response:
 
 ```json
 {
@@ -139,6 +98,26 @@ Response body:
 }
 ```
 
+Error response:
+
+```json
+{
+  "detail": {
+    "message": "Failed to fetch the YouTube transcript.",
+    "error_code": "transcript_fetch_failed",
+    "status": 502,
+    "stage": "youtube_transcript_fetch",
+    "retryable": true
+  }
+}
+```
+
+Stages:
+- `request_validation`
+- `youtube_track_lookup`
+- `youtube_transcript_fetch`
+- `openai_summary`
+
 ## Frontend Deployment
 The frontend is configured for GitHub Pages using `gh-pages`.
 
@@ -146,53 +125,31 @@ Typical deploy flow:
 
 ```bash
 cd frontend
+npm install
 npm run deploy
 ```
 
-The deploy script currently assumes the repository name is `summarize_youtube_video`. If the GitHub repo name changes, update the `build:gh-pages` script in [frontend/package.json](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/package.json).
-
-## Cloudflare Worker Deployment
-The repository now includes a Worker implementation in [worker/src/index.js](/Users/louispaulet/Documents/projects/summarize_youtube_video/worker/src/index.js) that exposes the same backend contract:
-
+## Worker Deployment
+The Worker exposes:
 - `GET /health`
 - `POST /api/summarize`
 
 Current deployed Worker:
+- [summarize-youtube-video-backend.louispaulet13.workers.dev](https://summarize-youtube-video-backend.louispaulet13.workers.dev)
 
-- `https://summarize-youtube-video-backend.louispaulet13.workers.dev`
-
-Useful Worker commands:
-
-```bash
-cd worker
-npm install
-npm run dev
-npm run deploy
-```
-
-Equivalent `make` command:
+Typical deploy flow:
 
 ```bash
 make deploy-worker
 ```
 
-Manual Wrangler deploy steps if you ever need to do it by hand:
+`worker/scripts/deploy.mjs` reads `OPENAI_API_KEY` and `CLOUDFLARE_API_TOKEN` from the shared repo-level `.env`, updates the Worker secret in Cloudflare, and deploys the Worker.
 
-```bash
-cp .env.example .env
-# fill in OPENAI_API_KEY in .env
+## Production failure note
+If a video works locally but fails from the deployed Worker, that usually means the environment changed rather than the UI. For `https://www.youtube.com/watch?v=jjp3WC8Unj8`, the deployed Worker currently returns:
 
-cd worker
-npm install
-
-export OPENAI_API_KEY="$(grep '^OPENAI_API_KEY=' ../.env | cut -d '=' -f2-)"
-printf '%s' "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY --config wrangler.jsonc
-npx wrangler deploy --config wrangler.jsonc
+```json
+{"detail":{"message":"Failed to fetch the YouTube transcript.","error_code":"transcript_fetch_failed","status":502,"stage":"youtube_transcript_fetch","retryable":true}}
 ```
 
-Notes:
-
-- Local development still uses the FastAPI backend on `http://localhost:8000`.
-- `npm run deploy` inside [worker/](/Users/louispaulet/Documents/projects/summarize_youtube_video/worker) now reads `OPENAI_API_KEY` from the shared repo-level `.env`, updates the Worker secret in Cloudflare, and then deploys.
-- If you want the frontend to target the deployed Worker, set `VITE_API_BASE_URL=https://summarize-youtube-video-backend.louispaulet13.workers.dev`.
-- GitHub Pages builds will already use that deployed backend automatically through [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production).
+The same transcript-fetch logic succeeds from this local machine, which makes the failure environment-dependent. The most likely explanation is that YouTube treats the Worker’s network origin differently and blocks or rate-limits transcript access there. We should describe that as likely network-origin/IP blocking or rate-limiting, not as a proven single-datacenter root cause.

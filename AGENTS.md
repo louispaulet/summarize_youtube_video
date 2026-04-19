@@ -3,21 +3,21 @@
 ## Project Overview
 - This repository is a monorepo for a simple YouTube video summarizer.
 - `frontend/` contains the Vite + React + Tailwind UI.
-- `backend/` contains the FastAPI API that fetches transcripts and generates summaries.
+- `worker/` contains the Cloudflare Worker API that fetches transcripts and generates summaries.
 
 ## Local Development
 - Frontend port is fixed to `5173`.
-- Backend port is fixed to `8000`.
+- Worker port is fixed to `8787`.
 - Use Chrome MCP for quick end-to-end checks against the deployed app:
   - frontend: `https://louispaulet.github.io/summarize_youtube_video/`
-  - backend: `https://summarize-youtube-video-backend.louispaulet13.workers.dev/api/summarize`
+  - worker: `https://summarize-youtube-video-backend.louispaulet13.workers.dev/api/summarize`
 - Preferred commands:
   - `make frontend`
-  - `make backend`
+  - `make worker`
   - `make up`
 
 ## Backend Rules
-- Use `uv` for Python dependency and runtime management.
+- The only backend is the Cloudflare Worker in `worker/`.
 - Read `OPENAI_API_KEY` from environment variables only.
 - Never hardcode or commit secrets, tokens, or `.env` files.
 - Keep the API contract simple:
@@ -36,4 +36,4 @@
 - After completing a change, always commit and push it unless the user explicitly says not to.
 - Preserve the deployment split:
   - frontend deploys to GitHub Pages
-  - backend deploys to a separate host
+  - worker deploys to a separate host

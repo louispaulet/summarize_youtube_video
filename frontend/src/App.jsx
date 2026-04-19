@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+const LOCAL_WORKER_URL = 'http://localhost:8787'
+
 function renderInlineMarkdown(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean)
 
@@ -83,27 +85,123 @@ function SummaryMarkdown({ markdown }) {
   )
 }
 
+function normalizeApiError(response, payload) {
+  const detail = payload?.detail
+
+  if (detail && typeof detail === 'object') {
+    return {
+      errorCode:
+        typeof detail.error_code === 'string'
+          ? detail.error_code
+          : 'unexpected_backend_failure',
+      message:
+        typeof detail.message === 'string'
+          ? detail.message
+          : 'Something went wrong while summarizing the video.',
+      retryable: Boolean(detail.retryable),
+      stage:
+        typeof detail.stage === 'string' ? detail.stage : 'request_validation',
+      status:
+        typeof detail.status === 'number' ? detail.status : response.status || null,
+    }
+  }
+
+  return {
+    errorCode: 'unexpected_backend_failure',
+    message:
+      typeof detail === 'string' && detail
+        ? detail
+        : 'Something went wrong while summarizing the video.',
+    retryable: response.status >= 500,
+    stage: 'request_validation',
+    status: response.status || null,
+  }
+}
+
+async function parseJsonSafely(response) {
+  const text = await response.text()
+  if (!text) {
+    return null
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+function stageLabel(stage) {
+  switch (stage) {
+    case 'request_validation':
+      return 'Request validation'
+    case 'youtube_track_lookup':
+      return 'YouTube track lookup'
+    case 'youtube_transcript_fetch':
+      return 'YouTube transcript fetch'
+    case 'openai_summary':
+      return 'OpenAI summary'
+    default:
+      return 'Unknown stage'
+  }
+}
+
+function ErrorCard({ error }) {
+  if (!error) {
+    return null
+  }
+
+  return (
+    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-900">
+      <p className="font-semibold text-rose-950">{error.message}</p>
+      {(error.status || error.errorCode || error.stage) && (
+        <p className="mt-2 leading-6 text-rose-800">
+          {error.status ? `API status ${error.status}. ` : ''}
+          {error.errorCode ? `Code: ${error.errorCode}. ` : ''}
+          {error.stage ? `Stage: ${stageLabel(error.stage)}.` : ''}
+        </p>
+      )}
+      {error.retryable ? (
+        <p className="mt-2 leading-6 text-rose-800">
+          This looks temporary, so retrying in a moment may work.
+        </p>
+      ) : null}
+      {error.apiBaseUrl ? (
+        <p className="mt-2 break-all leading-6 text-rose-700">
+          API target: {error.apiBaseUrl}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function App() {
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [summary, setSummary] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const apiBaseUrl =
-    import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000'
+    import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || LOCAL_WORKER_URL
 
   async function handleSubmit(event) {
     event.preventDefault()
 
     const trimmedUrl = youtubeUrl.trim()
     if (!trimmedUrl) {
-      setError('Please enter a YouTube URL to summarize.')
+      setError({
+        errorCode: 'youtube_url_required',
+        message: 'Please enter a YouTube URL to summarize.',
+        retryable: false,
+        stage: 'request_validation',
+        status: 400,
+      })
       setSummary('')
       return
     }
 
     setIsSubmitting(true)
-    setError('')
+    setError(null)
     setSummary('')
 
     try {
@@ -115,19 +213,53 @@ function App() {
         body: JSON.stringify({ youtube_url: trimmedUrl }),
       })
 
-      const data = await response.json()
+      const data = await parseJsonSafely(response)
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Something went wrong while summarizing the video.')
+        throw normalizeApiError(response, data)
       }
 
-      setSummary(data.summary_markdown)
+      setSummary(data?.summary_markdown || '')
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : 'Unable to summarize this video right now.'
-      )
+      if (submitError instanceof TypeError) {
+        setError({
+          apiBaseUrl,
+          errorCode: 'api_unreachable',
+          message:
+            'The app could not reach the API. Please check that the local Worker or deployed backend is available.',
+          retryable: true,
+          stage: 'request_validation',
+          status: null,
+        })
+      } else if (submitError && typeof submitError === 'object') {
+        setError({
+          apiBaseUrl,
+          errorCode:
+            typeof submitError.errorCode === 'string'
+              ? submitError.errorCode
+              : 'unexpected_backend_failure',
+          message:
+            typeof submitError.message === 'string'
+              ? submitError.message
+              : 'Unable to summarize this video right now.',
+          retryable: Boolean(submitError.retryable),
+          stage:
+            typeof submitError.stage === 'string'
+              ? submitError.stage
+              : 'request_validation',
+          status:
+            typeof submitError.status === 'number' ? submitError.status : null,
+        })
+      } else {
+        setError({
+          apiBaseUrl,
+          errorCode: 'unexpected_backend_failure',
+          message: 'Unable to summarize this video right now.',
+          retryable: false,
+          stage: 'request_validation',
+          status: null,
+        })
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -182,13 +314,9 @@ function App() {
               </button>
               <p className="text-sm leading-6 text-stone-500">
                 Local frontend: <span className="font-medium text-stone-700">5173</span>.
-                Local backend: <span className="font-medium text-stone-700">8000</span>.
+                Local Worker: <span className="font-medium text-stone-700">8787</span>.
               </p>
-              {error ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                  {error}
-                </div>
-              ) : null}
+              <ErrorCard error={error} />
             </form>
           </div>
         </section>
