@@ -26,7 +26,7 @@ up:
 	@trap 'kill 0' EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
 kill:
-	@pids=$$(lsof -ti tcp:5173 tcp:8000); \
+	@pids=$$(lsof -ti -iTCP:5173 -iTCP:8000 -sTCP:LISTEN); \
 	if [ -n "$$pids" ]; then \
 		kill $$pids; \
 		echo "Stopped processes on ports 5173 and 8000"; \
