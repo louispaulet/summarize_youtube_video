@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-const LOCAL_WORKER_URL = 'http://localhost:8787'
+const LOCAL_API_BASE_URL = ''
 
 function renderInlineMarkdown(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean)
@@ -181,8 +181,9 @@ function App() {
   const [error, setError] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const apiBaseUrl =
-    import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || LOCAL_WORKER_URL
+  const apiBaseUrl = import.meta.env.DEV
+    ? LOCAL_API_BASE_URL
+    : import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || ''
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -223,7 +224,7 @@ function App() {
     } catch (submitError) {
       if (submitError instanceof TypeError) {
         setError({
-          apiBaseUrl,
+          apiBaseUrl: apiBaseUrl || 'Vite dev proxy -> http://127.0.0.1:8787',
           errorCode: 'api_unreachable',
           message:
             'The app could not reach the API. Please check that the local Worker or deployed backend is available.',
@@ -233,7 +234,7 @@ function App() {
         })
       } else if (submitError && typeof submitError === 'object') {
         setError({
-          apiBaseUrl,
+          apiBaseUrl: apiBaseUrl || 'Vite dev proxy -> http://127.0.0.1:8787',
           errorCode:
             typeof submitError.errorCode === 'string'
               ? submitError.errorCode
@@ -252,7 +253,7 @@ function App() {
         })
       } else {
         setError({
-          apiBaseUrl,
+          apiBaseUrl: apiBaseUrl || 'Vite dev proxy -> http://127.0.0.1:8787',
           errorCode: 'unexpected_backend_failure',
           message: 'Unable to summarize this video right now.',
           retryable: false,
@@ -315,6 +316,7 @@ function App() {
               <p className="text-sm leading-6 text-stone-500">
                 Local frontend: <span className="font-medium text-stone-700">5173</span>.
                 Local Worker: <span className="font-medium text-stone-700">8787</span>.
+                Dev requests use the frontend proxy.
               </p>
               <ErrorCard error={error} />
             </form>

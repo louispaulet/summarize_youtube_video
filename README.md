@@ -28,18 +28,19 @@ cp .env.example .env
 ```
 
 ## Frontend Environment
-Create the frontend env file if you want an explicit local override:
+Create the frontend env file if you want an explicit production-style override:
 
 ```bash
 cp frontend/.env.example frontend/.env
 ```
 
-Local default:
+Production/deployed frontend target:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8787
+VITE_API_BASE_URL=https://summarize-youtube-video-backend.louispaulet13.workers.dev
 ```
 
+Local development does not need `VITE_API_BASE_URL`. The Vite dev server proxies `/api` and `/health` to the fixed local Worker port `8787`, so stale local values like `http://localhost:8000` are ignored in dev.
 Production builds already point to the deployed Worker through [frontend/.env.production](/Users/louispaulet/Documents/projects/summarize_youtube_video/frontend/.env.production).
 
 ## Make Commands
